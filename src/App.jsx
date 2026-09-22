@@ -1,6 +1,7 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState, useCallback } from "react";
 import jsPDF from "jspdf";
 import html2canvas from "html2canvas";
+import { invoiceApi } from "./api/invoiceApi";
 import "./App.css";
 
 const createInvoiceNumber = () => {
@@ -27,6 +28,7 @@ const createEmptyItem = () => ({
 });
 
 const defaultInvoice = () => ({
+  id: null,
   invoiceNumber: createInvoiceNumber(),
   invoiceDate: today,
   dueDate: today,
@@ -78,6 +80,36 @@ export default function App() {
   });
 
   const [taxType, setTaxType] = useState("intra");
+
+  // Backend state
+  const [isBackendConnected, setIsBackendConnected] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [toast, setToast] = useState(null);
+
+  // Saved Invoices Modal state
+  const [isListModalOpen, setIsListModalOpen] = useState(false);
+  const [savedInvoices, setSavedInvoices] = useState([]);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [isLoadingList, setIsLoadingList] = useState(false);
+
+  const showToast = (message, type = "success") => {
+    setToast({ message, type });
+    setTimeout(() => {
+      setToast(null);
+    }, 4000);
+  };
+
+  // Check backend health periodically
+  const checkBackend = useCallback(async () => {
+    const connected = await invoiceApi.checkHealth();
+    setIsBackendConnected(connected);
+  }, []);
+
+  useEffect(() => {
+    checkBackend();
+    const interval = setInterval(checkBackend, 15000);
+    return () => clearInterval(interval);
+  }, [checkBackend]);
 
   useEffect(() => {
     localStorage.setItem("invoice_data", JSON.stringify(invoice));
@@ -247,21 +279,123 @@ export default function App() {
     });
   };
 
-  const generateNewInvoice = () => {
+  // Backend Integration Handlers
+  const handleSaveToBackend = async () => {
+    setIsSaving(true);
+    try {
+      const payload = {
+        ...invoice,
+        taxType,
+        items: invoice.items.map((item) => ({
+          ...item,
+          quantity: Number(item.quantity) || 0,
+          rate: Number(item.rate) || 0,
+          gst: Number(item.gst) || 0,
+        })),
+      };
+
+      const savedData = await invoiceApi.saveInvoice(payload);
+
+      // Normalize seller and customer if returned from API
+      const normalizedInvoice = {
+        ...defaultInvoice(),
+        ...savedData,
+        seller: savedData.seller || invoice.seller,
+        customer: savedData.customer || invoice.customer,
+        items: savedData.items && savedData.items.length > 0 ? savedData.items : invoice.items,
+      };
+
+      setInvoice(normalizedInvoice);
+      showToast(`Invoice ${normalizedInvoice.invoiceNumber} saved to backend database!`, "success");
+      setIsBackendConnected(true);
+    } catch (error) {
+      console.error("Save to backend failed:", error);
+      showToast("Could not save to Spring Boot backend. Is server running on port 8080?", "error");
+      setIsBackendConnected(false);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleOpenSavedList = async () => {
+    setIsListModalOpen(true);
+    fetchSavedInvoices();
+  };
+
+  const fetchSavedInvoices = async (query = "") => {
+    setIsLoadingList(true);
+    try {
+      const data = await invoiceApi.getAllInvoices(query);
+      setSavedInvoices(data);
+      setIsBackendConnected(true);
+    } catch (error) {
+      console.error("Failed to load saved invoices:", error);
+      showToast("Unable to load invoices from Spring Boot backend", "error");
+    } finally {
+      setIsLoadingList(false);
+    }
+  };
+
+  const handleSearchChange = (e) => {
+    const query = e.target.value;
+    setSearchQuery(query);
+    fetchSavedInvoices(query);
+  };
+
+  const handleLoadInvoice = (savedInv) => {
+    const loaded = {
+      ...defaultInvoice(),
+      ...savedInv,
+      seller: savedInv.seller || defaultInvoice().seller,
+      customer: savedInv.customer || defaultInvoice().customer,
+      items: savedInv.items && savedInv.items.length > 0 ? savedInv.items : [createEmptyItem()],
+    };
+
+    setInvoice(loaded);
+    if (savedInv.taxType) {
+      setTaxType(savedInv.taxType);
+    }
+    setIsListModalOpen(false);
+    showToast(`Loaded invoice ${savedInv.invoiceNumber}`, "success");
+  };
+
+  const handleDeleteSavedInvoice = async (id, invNum, e) => {
+    e.stopPropagation();
+    if (!window.confirm(`Are you sure you want to delete invoice ${invNum}?`)) {
+      return;
+    }
+
+    try {
+      await invoiceApi.deleteInvoice(id);
+      showToast(`Invoice ${invNum} deleted successfully`, "success");
+      fetchSavedInvoices(searchQuery);
+    } catch (error) {
+      console.error("Delete failed:", error);
+      showToast(`Failed to delete invoice ${invNum}`, "error");
+    }
+  };
+
+  const generateNewInvoice = async () => {
     const confirmed = window.confirm(
-      "Create a new invoice? Current invoice data will remain saved in your browser, but the form will be reset."
+      "Create a new invoice? Current invoice data will remain saved, but the form will be reset."
     );
 
     if (!confirmed) {
       return;
     }
 
+    let nextNumber = null;
+    if (isBackendConnected) {
+      nextNumber = await invoiceApi.getNextInvoiceNumber();
+    }
+
     setInvoice({
       ...defaultInvoice(),
-      invoiceNumber: createInvoiceNumber(),
+      invoiceNumber: nextNumber || createInvoiceNumber(),
     });
 
     setTaxType("intra");
+    showToast("Started new invoice form", "success");
   };
 
   const printInvoice = () => {
@@ -348,17 +482,55 @@ export default function App() {
 
   return (
     <div className="app">
-      <header className="topbar">
-        <div>
-          <h1>Invoice Generator</h1>
+      {/* Toast Popup Notification */}
+      {toast && (
+        <div className="toast-container">
+          <div className={`toast ${toast.type}`}>
+            {toast.message}
+          </div>
+        </div>
+      )}
 
-          <p>
-            Create professional invoices quickly and
-            easily
-          </p>
+      <header className="topbar">
+        <div className="topbar-info">
+          <div>
+            <h1>Invoice Generator</h1>
+            <p>Create and manage professional invoices with Java Spring Boot backend</p>
+          </div>
+
+          <div
+            className={`status-badge ${
+              isBackendConnected ? "connected" : "disconnected"
+            }`}
+            title={
+              isBackendConnected
+                ? "Spring Boot backend running on port 8080"
+                : "Spring Boot backend disconnected"
+            }
+          >
+            <span className="status-dot"></span>
+            {isBackendConnected ? "Spring Boot Active" : "Backend Offline"}
+          </div>
         </div>
 
         <div className="top-actions">
+          <button
+            type="button"
+            className="success-btn"
+            onClick={handleSaveToBackend}
+            disabled={isSaving}
+          >
+            {isSaving ? "Saving..." : "💾 Save Invoice"}
+          </button>
+
+          <button
+            type="button"
+            className="secondary-btn"
+            onClick={handleOpenSavedList}
+          >
+            📋 Saved Invoices
+          </button>
+
           <button
             type="button"
             className="secondary-btn"
@@ -388,8 +560,13 @@ export default function App() {
       <main className="layout">
         <section className="editor">
           <div className="card">
-            <div className="section-title">
+            <div className="section-title row-between">
               <h2>Invoice Details</h2>
+              {invoice.id && (
+                <span style={{ fontSize: "12px", color: "var(--success)", fontWeight: "600" }}>
+                  ✓ Database ID: #{invoice.id}
+                </span>
+              )}
             </div>
 
             <div className="grid three">
@@ -470,7 +647,7 @@ export default function App() {
 
                 <Input
                   label="Business Name"
-                  value={invoice.seller.name}
+                  value={invoice.seller?.name}
                   placeholder="Your Business Name"
                   onChange={(value) =>
                     updateSection(
@@ -483,7 +660,7 @@ export default function App() {
 
                 <Textarea
                   label="Business Address"
-                  value={invoice.seller.address}
+                  value={invoice.seller?.address}
                   placeholder="Complete business address"
                   onChange={(value) =>
                     updateSection(
@@ -496,7 +673,7 @@ export default function App() {
 
                 <Input
                   label="Phone"
-                  value={invoice.seller.phone}
+                  value={invoice.seller?.phone}
                   placeholder="+91 XXXXX XXXXX"
                   onChange={(value) =>
                     updateSection(
@@ -510,7 +687,7 @@ export default function App() {
                 <Input
                   label="Email"
                   type="email"
-                  value={invoice.seller.email}
+                  value={invoice.seller?.email}
                   placeholder="business@example.com"
                   onChange={(value) =>
                     updateSection(
@@ -524,7 +701,7 @@ export default function App() {
                 <div className="grid two">
                   <Input
                     label="GSTIN"
-                    value={invoice.seller.gstin}
+                    value={invoice.seller?.gstin}
                     placeholder="GSTIN"
                     onChange={(value) =>
                       updateSection(
@@ -537,7 +714,7 @@ export default function App() {
 
                   <Input
                     label="PAN"
-                    value={invoice.seller.pan}
+                    value={invoice.seller?.pan}
                     placeholder="PAN"
                     onChange={(value) =>
                       updateSection(
@@ -557,7 +734,7 @@ export default function App() {
 
                 <Input
                   label="Customer Name"
-                  value={invoice.customer.name}
+                  value={invoice.customer?.name}
                   placeholder="Customer Name"
                   onChange={(value) =>
                     updateSection(
@@ -570,7 +747,7 @@ export default function App() {
 
                 <Input
                   label="Company Name"
-                  value={invoice.customer.company}
+                  value={invoice.customer?.company}
                   placeholder="Company Name"
                   onChange={(value) =>
                     updateSection(
@@ -583,7 +760,7 @@ export default function App() {
 
                 <Textarea
                   label="Billing Address"
-                  value={invoice.customer.address}
+                  value={invoice.customer?.address}
                   placeholder="Customer billing address"
                   onChange={(value) =>
                     updateSection(
@@ -596,7 +773,7 @@ export default function App() {
 
                 <Input
                   label="Phone"
-                  value={invoice.customer.phone}
+                  value={invoice.customer?.phone}
                   placeholder="+91 XXXXX XXXXX"
                   onChange={(value) =>
                     updateSection(
@@ -610,7 +787,7 @@ export default function App() {
                 <Input
                   label="Email"
                   type="email"
-                  value={invoice.customer.email}
+                  value={invoice.customer?.email}
                   placeholder="customer@example.com"
                   onChange={(value) =>
                     updateSection(
@@ -623,7 +800,7 @@ export default function App() {
 
                 <Input
                   label="GSTIN"
-                  value={invoice.customer.gstin}
+                  value={invoice.customer?.gstin}
                   placeholder="GSTIN"
                   onChange={(value) =>
                     updateSection(
@@ -655,7 +832,7 @@ export default function App() {
                 (item, index) => (
                   <div
                     className="item-editor"
-                    key={item.id}
+                    key={item.id || index}
                   >
                     <div className="item-number">
                       {index + 1}
@@ -901,7 +1078,7 @@ export default function App() {
             <div className="invoice-header">
               <div>
                 <div className="logo-box">
-                  {invoice.seller.name
+                  {invoice.seller?.name
                     ? invoice.seller.name
                         .charAt(0)
                         .toUpperCase()
@@ -909,22 +1086,22 @@ export default function App() {
                 </div>
 
                 <h1>
-                  {invoice.seller.name ||
+                  {invoice.seller?.name ||
                     "Your Business Name"}
                 </h1>
 
                 <p>
-                  {invoice.seller.address ||
+                  {invoice.seller?.address ||
                     "Business address"}
                 </p>
 
-                {invoice.seller.phone && (
+                {invoice.seller?.phone && (
                   <p>
                     {invoice.seller.phone}
                   </p>
                 )}
 
-                {invoice.seller.email && (
+                {invoice.seller?.email && (
                   <p>
                     {invoice.seller.email}
                   </p>
@@ -971,35 +1148,35 @@ export default function App() {
                 </span>
 
                 <h3>
-                  {invoice.seller.name ||
+                  {invoice.seller?.name ||
                     "Your Business Name"}
                 </h3>
 
                 <p>
-                  {invoice.seller.address ||
+                  {invoice.seller?.address ||
                     "Business address"}
                 </p>
 
-                {invoice.seller.phone && (
+                {invoice.seller?.phone && (
                   <p>
                     {invoice.seller.phone}
                   </p>
                 )}
 
-                {invoice.seller.email && (
+                {invoice.seller?.email && (
                   <p>
                     {invoice.seller.email}
                   </p>
                 )}
 
-                {invoice.seller.gstin && (
+                {invoice.seller?.gstin && (
                   <p>
                     <strong>GSTIN:</strong>{" "}
                     {invoice.seller.gstin}
                   </p>
                 )}
 
-                {invoice.seller.pan && (
+                {invoice.seller?.pan && (
                   <p>
                     <strong>PAN:</strong>{" "}
                     {invoice.seller.pan}
@@ -1013,34 +1190,34 @@ export default function App() {
                 </span>
 
                 <h3>
-                  {invoice.customer.name ||
+                  {invoice.customer?.name ||
                     "Customer Name"}
                 </h3>
 
-                {invoice.customer.company && (
+                {invoice.customer?.company && (
                   <p>
                     {invoice.customer.company}
                   </p>
                 )}
 
                 <p>
-                  {invoice.customer.address ||
+                  {invoice.customer?.address ||
                     "Customer address"}
                 </p>
 
-                {invoice.customer.phone && (
+                {invoice.customer?.phone && (
                   <p>
                     {invoice.customer.phone}
                   </p>
                 )}
 
-                {invoice.customer.email && (
+                {invoice.customer?.email && (
                   <p>
                     {invoice.customer.email}
                   </p>
                 )}
 
-                {invoice.customer.gstin && (
+                {invoice.customer?.gstin && (
                   <p>
                     <strong>GSTIN:</strong>{" "}
                     {invoice.customer.gstin}
@@ -1084,7 +1261,7 @@ export default function App() {
                         ) || 0);
 
                       return (
-                        <tr key={item.id}>
+                        <tr key={item.id || index}>
                           <td>
                             {index + 1}
                           </td>
@@ -1323,6 +1500,99 @@ export default function App() {
           </div>
         </section>
       </main>
+
+      {/* Saved Invoices Modal */}
+      {isListModalOpen && (
+        <div className="modal-overlay" onClick={() => setIsListModalOpen(false)}>
+          <div className="modal-container" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>Saved Invoices Database</h2>
+              <button className="close-btn" onClick={() => setIsListModalOpen(false)}>
+                &times;
+              </button>
+            </div>
+
+            <div className="modal-body">
+              <div className="search-box">
+                <input
+                  type="text"
+                  placeholder="🔍 Search invoices by number, customer, or seller..."
+                  value={searchQuery}
+                  onChange={handleSearchChange}
+                />
+              </div>
+
+              {isLoadingList ? (
+                <div style={{ textAlign: "center", padding: "30px", color: "var(--muted)" }}>
+                  Loading saved invoices...
+                </div>
+              ) : savedInvoices.length === 0 ? (
+                <div style={{ textAlign: "center", padding: "40px", color: "var(--muted)" }}>
+                  {searchQuery ? "No invoices match your search." : "No saved invoices found in database."}
+                </div>
+              ) : (
+                <table className="saved-table">
+                  <thead>
+                    <tr>
+                      <th>Invoice #</th>
+                      <th>Date</th>
+                      <th>Customer</th>
+                      <th>Total</th>
+                      <th>Balance</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {savedInvoices.map((inv) => (
+                      <tr key={inv.id || inv.invoiceNumber}>
+                        <td>
+                          <strong>{inv.invoiceNumber}</strong>
+                        </td>
+                        <td>{formatDate(inv.invoiceDate)}</td>
+                        <td>
+                          <strong>{inv.customer?.name || "N/A"}</strong>
+                          {inv.customer?.company && (
+                            <div style={{ fontSize: "11px", color: "var(--muted)" }}>
+                              {inv.customer.company}
+                            </div>
+                          )}
+                        </td>
+                        <td>
+                          <strong>{currency(inv.total)}</strong>
+                        </td>
+                        <td>
+                          <span style={{ color: inv.balance > 0 ? "var(--danger)" : "var(--success)", fontWeight: "600" }}>
+                            {currency(inv.balance)}
+                          </span>
+                        </td>
+                        <td>
+                          <div className="action-buttons">
+                            <button
+                              type="button"
+                              className="small-primary"
+                              onClick={() => handleLoadInvoice(inv)}
+                            >
+                              Load
+                            </button>
+                            <button
+                              type="button"
+                              className="delete-btn"
+                              style={{ marginTop: 0 }}
+                              onClick={(e) => handleDeleteSavedInvoice(inv.id, inv.invoiceNumber, e)}
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

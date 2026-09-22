@@ -71,19 +71,67 @@ button {
   font-size: 13px;
 }
 
+.topbar-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.status-badge.connected {
+  background: #d1fae5;
+  color: #065f46;
+  border: 1px solid #a7f3d0;
+}
+
+.status-badge.disconnected {
+  background: #fee2e2;
+  color: #991b1b;
+  border: 1px solid #fca5a5;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.status-badge.connected .status-dot {
+  background: #10b981;
+  box-shadow: 0 0 6px #10b981;
+}
+
+.status-badge.disconnected .status-dot {
+  background: #ef4444;
+}
+
 .top-actions {
   display: flex;
   gap: 10px;
+  align-items: center;
 }
 
 .primary-btn,
 .secondary-btn,
+.success-btn,
 .small-primary {
   border: 0;
   border-radius: 8px;
   padding: 11px 16px;
   font-weight: 600;
   transition: 0.2s;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .primary-btn {
@@ -92,8 +140,17 @@ button {
 }
 
 .primary-btn:hover {
-  background: #8af4ab;
-  color: black;
+  background: #1d4ed8;
+  color: white;
+}
+
+.success-btn {
+  background: #10b981;
+  color: white;
+}
+
+.success-btn:hover {
+  background: #059669;
 }
 
 .secondary-btn {
@@ -103,8 +160,8 @@ button {
 }
 
 .secondary-btn:hover {
-  background: #8af4ab;
-  border: none;
+  background: #f3f4f6;
+  border-color: #d1d5db;
 }
 
 .small-primary {
@@ -276,6 +333,10 @@ button {
   background: transparent;
   color: var(--danger);
   font-size: 12px;
+}
+
+.delete-btn:hover {
+  text-decoration: underline;
 }
 
 /* TAX */
@@ -562,6 +623,150 @@ button {
 
   color: var(--muted);
   font-size: 10px;
+}
+
+/* MODAL & DRAWER FOR SAVED INVOICES */
+
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  backdrop-filter: blur(4px);
+  padding: 20px;
+}
+
+.modal-container {
+  background: white;
+  width: min(850px, 100%);
+  max-height: 85vh;
+  border-radius: 12px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.modal-header {
+  padding: 20px 24px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.modal-header h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.close-btn {
+  background: none;
+  border: none;
+  font-size: 22px;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+
+.close-btn:hover {
+  background: #f3f4f6;
+  color: var(--text);
+}
+
+.modal-body {
+  padding: 24px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.search-box {
+  width: 100%;
+}
+
+.search-box input {
+  width: 100%;
+  padding: 10px 14px;
+  border: 1px solid #d0d5dd;
+  border-radius: 8px;
+  outline: none;
+}
+
+.saved-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.saved-table th {
+  background: #f8fafc;
+  padding: 12px;
+  text-align: left;
+  font-size: 12px;
+  color: var(--muted);
+  border-bottom: 1px solid var(--border);
+}
+
+.saved-table td {
+  padding: 14px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+
+.saved-table tr:hover td {
+  background: #f9fafb;
+}
+
+.action-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.toast-container {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 2000;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.toast {
+  padding: 12px 20px;
+  border-radius: 8px;
+  color: white;
+  font-weight: 500;
+  font-size: 14px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  animation: slideIn 0.3s ease-out;
+}
+
+.toast.success {
+  background: #10b981;
+}
+
+.toast.error {
+  background: #ef4444;
+}
+
+@keyframes slideIn {
+  from {
+    transform: translateY(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
 }
 
 /* RESPONSIVE */
