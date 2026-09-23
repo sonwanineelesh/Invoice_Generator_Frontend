@@ -1,4 +1,5 @@
-const API_BASE_URL = "http://localhost:8080/api/invoices";
+const API_ORIGIN = import.meta.env.VITE_API_BASE_URL || "http://localhost:8080";
+const API_BASE_URL = `${API_ORIGIN}/api/invoices`;
 
 export const invoiceApi = {
 
@@ -87,7 +88,7 @@ export const invoiceApi = {
   // Ping backend to check health
   async checkHealth() {
     try {
-      const response = await fetch(API_BASE_URL);
+      const response = await fetch(`${API_ORIGIN}/health`);
       return response.ok;
     } catch {
       return false;
