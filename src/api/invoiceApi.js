@@ -1,4 +1,4 @@
-const API_ORIGIN = import.meta.env.VITE_API_BASE_URL || "http://localhost:8080";
+const API_ORIGIN = import.meta.env.VITE_API_BASE_URL || "https://invoice-generator-backend-2519.onrender.com";
 const API_BASE_URL = `${API_ORIGIN}/api/invoices`;
 
 export const invoiceApi = {
